@@ -79,8 +79,8 @@ struct Bldc{
 struct BldcSpeed{
 	volatile unsigned long long int rotatesCounter;
 	volatile unsigned long long int timerCounter;
-	volatile unsigned int currentRpm;
-	volatile unsigned int expectedRpm;
+	volatile unsigned long long int currentRpm;
+	volatile unsigned long long int expectedRpm;
 } bldcSpeed = {0};
 
 enum {
@@ -100,7 +100,7 @@ void delayus(uint64_t delay){
 
 	}
 }
-char str_help[100];
+char str_help[200];
 int main(void)
 {
 	DIS_ALL;
@@ -113,12 +113,14 @@ int main(void)
     /* Replace with your application code */
 	uint64_t stepDelay = 2000;
 	int whileDelay = 0;
+	bldcUI.showSpeed = true;
     while (1) 
     {
-		if (whileDelay++ > 10000){
+		if (whileDelay++ > 10){
 			whileDelay = 0;
 			if (bldcUI.showSpeed){
-				sprintf(str_help, "SPD: %d\r\n", bldcSpeed.currentRpm);
+				sprintf(str_help, "SPD: %u\r\n", bldcSpeed.currentRpm);
+				uart_puts(str_help);
 			}
 		}
 		int uart = uart_getc();
@@ -367,8 +369,9 @@ void bldcNextStepZC(void){
 
 void bldcSpeedCalc(){
 	if (bldcSpeed.rotatesCounter != 0){
-		bldcSpeed.currentRpm = bldcSpeed.timerCounter/bldcSpeed.rotatesCounter;
+		bldcSpeed.currentRpm = (bldcSpeed.rotatesCounter*1000)/bldcSpeed.timerCounter;
 		bldcSpeed.timerCounter = 0;
+		bldcSpeed.rotatesCounter = 0;
 	}
 }
 void bldcStartUp(void){
@@ -433,5 +436,5 @@ else{
 }
 
 ISR (TIMER1_OVF_vect) {
-	bldcSpeed.timerCounter++;
+	bldcSpeed.timerCounter += 512;
 }
