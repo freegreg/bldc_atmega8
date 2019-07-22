@@ -216,7 +216,7 @@ void timersPwmInit(void){
 	TCCR2 = (1 << WGM20) | (1 << CS20) | (0 << COM21);
 	
 	//Timer1 Enable Overflow Interrupt for Speed Measure
-	TIMSK != (1 << TOIE1);
+	TIMSK |= (1 << TOIE1);
 
 }
 
