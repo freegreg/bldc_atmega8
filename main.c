@@ -63,20 +63,26 @@ typedef enum _bldcPhase{
 	PHASE_V
 } BldcPhase;
 
+struct BldcUI{
+	bool showSpeed;
+} bldcUI = {0};
 
-volatile bool bldcDirection = false;
-volatile bool changeBldcDirection = false;
+struct Bldc{
+	volatile long long int startupDelay;
+	volatile long long int zcLag;
+	volatile bool zcCapturred;
+	volatile bool direction;
+	volatile bool changeDirection;
+	volatile int step;
+} bldc = {0};
 
-volatile int bldcStep = 0;
+struct BldcSpeed{
+	volatile unsigned long long int rotatesCounter;
+	volatile unsigned long long int timerCounter;
+	volatile unsigned int currentRpm;
+	volatile unsigned int expectedRpm;
+} bldcSpeed = {0};
 
-
-volatile long long int bldcStartUpDelay = 0;
-volatile long long int bldcZcLag = 0;
-volatile bool zcCapturred = false;
-
-volatile unsigned long long int stepCounter = 0;
-volatile unsigned long long int speedTimerCounter = 0;
-volatile unsigned int bldcSpeedRpm = 0;
 enum {
 	BLDC_WAIT,
 	BLDC_STARTUP,
@@ -106,8 +112,15 @@ int main(void)
 	uart_puts("MAIN_LOOP START\n");
     /* Replace with your application code */
 	uint64_t stepDelay = 2000;
+	int whileDelay = 0;
     while (1) 
     {
+		if (whileDelay++ > 10000){
+			whileDelay = 0;
+			if (bldcUI.showSpeed){
+				sprintf(str_help, "SPD: %d\r\n", bldcSpeed.currentRpm);
+			}
+		}
 		int uart = uart_getc();
 		if (uart != UART_NO_DATA){
 			char uar = uart & 0x00FF;
@@ -118,7 +131,7 @@ int main(void)
 					_delay_ms(10);
 				break;
 				case BLDC_STARTUP:
-					//if (bldcStartUpDelay++ < 5000){
+					//if (bldc.startupDelay++ < 5000){
 					if (stepDelay > 100){
 							stepDelay -= 5;
 						//}
@@ -131,7 +144,7 @@ int main(void)
 						bldcState = BLDC_RUNNING;
 						sprintf(str_help, "BLDC_RUNNING\n");
 						uart_puts(str_help);
-						bldcStartUpDelay = 0;
+						bldc.startupDelay = 0;
 						stepDelay = 2000;
 						ACSR  |=  (1 << ACIE); //Enalbe AC interrupt
 					}
@@ -139,24 +152,24 @@ int main(void)
 				case BLDC_RUNNING:
 					if (!bldcRunning())
 						bldcState = BLDC_STOP;
-					if (changeBldcDirection){
+					if (bldc.changeDirection){
 						bldcState = BLDC_STOP;
 					}
 						_delay_ms(10);
 				break;
 				case BLDC_STOP:
 					uart_puts("BLDC_STOP\n");
-					ACSR  &=  ~(1 << ACIE); //Enalbe AC interrupt
+					ACSR  &=  ~(1 << ACIE); //Disable AC interrupt
 					DIS_ALL;
 					_delay_ms(10);
 					DIS_ALL;
-					bldcStep = 0;
-					bldcStartUpDelay = 0;
-					bldcZcLag = 0;
-					zcCapturred = false;
-					if (changeBldcDirection){
-						changeBldcDirection = false;
-						bldcDirection = !bldcDirection;
+					bldc.step = 0;
+					bldc.startupDelay = 0;
+					bldc.zcLag = 0;
+					bldc.zcCapturred = false;
+					if (bldc.changeDirection){
+						bldc.changeDirection = false;
+						bldc.direction = !bldc.direction;
 						_delay_ms(100);
 						bldcState = BLDC_STARTUP;
 					}else {
@@ -183,7 +196,9 @@ void uartTerminator(char uart_ch){
 	}else if (uart_ch == 'x'){
 		bldcState = BLDC_STOP;
 	}else if (uart_ch == 'w'){
-		changeBldcDirection = true;
+		bldc.changeDirection = true;
+	}else if (uart_ch == 'e'){
+		bldcUI.showSpeed = !bldcUI.showSpeed;
 	}
 	 if (uart_ch == '\n' && curr_ur > 0){
 		 uint8_t pwm =  ((curr_ur > 2) ? (100 * (buff_uart[curr_ur-3]-'0')) : 0) +
@@ -218,6 +233,10 @@ void timersPwmInit(void){
 	//Timer1 Enable Overflow Interrupt for Speed Measure
 	TIMSK |= (1 << TOIE1);
 
+}
+
+void setSpeed(){
+	
 }
 
 void setPwm(uint8_t pwm){
@@ -260,14 +279,14 @@ void checkZCPhase(BldcPhase phase){
 }
 
 void bldcNextStepZC(void){
-	stepCounter++;
-	switch(bldcStep){
+	bldcSpeed.rotatesCounter++;
+	switch(bldc.step){
 		case 0:
 			//uv
 			U_H_EN;
 			V_L_EN;
 			checkZCPhase(PHASE_W);
-			if (bldcDirection){
+			if (bldc.direction){
 				ACSR  |= (1 << ACIS1);
 				ACSR   &= ~(1 << ACIS0);//Comparator Interrupt on Falling Output Edge
 			}
@@ -280,7 +299,7 @@ void bldcNextStepZC(void){
 			W_H_EN;
 			V_L_EN;
 			checkZCPhase(PHASE_U);
-			if (bldcDirection){
+			if (bldc.direction){
 				ACSR  |= (1 << ACIS1) | (1 << ACIS0);//Comparator Interrupt on Falling Output Edge
 			}
 			else{
@@ -293,7 +312,7 @@ void bldcNextStepZC(void){
 			W_H_EN;
 			U_L_EN;
 			checkZCPhase(PHASE_V);
-			if (bldcDirection){
+			if (bldc.direction){
 				ACSR  |= (1 << ACIS1);
 				ACSR   &= ~(1 << ACIS0);//Comparator Interrupt on Falling Output Edge
 			}
@@ -306,7 +325,7 @@ void bldcNextStepZC(void){
 			V_H_EN;
 			U_L_EN;
 			checkZCPhase(PHASE_W);
-			if (bldcDirection){
+			if (bldc.direction){
 				ACSR  |= (1 << ACIS1) | (1 << ACIS0);//Comparator Interrupt on Falling Output Edge
 			}
 			else{
@@ -319,7 +338,7 @@ void bldcNextStepZC(void){
 			V_H_EN;
 			W_L_EN;
 			checkZCPhase(PHASE_U);
-			if (bldcDirection){
+			if (bldc.direction){
 				ACSR  |= (1 << ACIS1);
 				ACSR   &= ~(1 << ACIS0);//Comparator Interrupt on Falling Output Edge
 			}
@@ -332,7 +351,7 @@ void bldcNextStepZC(void){
 			U_H_EN;
 			W_L_EN;
 			checkZCPhase(PHASE_V);
-			if (bldcDirection){
+			if (bldc.direction){
 				ACSR  |= (1 << ACIS1) | (1 << ACIS0);//Comparator Interrupt on Falling Output Edge
 			}
 			else{
@@ -341,18 +360,24 @@ void bldcNextStepZC(void){
 			}
 		break;
 		default:
-			bldcStep = 0;
+			bldc.step = 0;
 		break;
 	}
 }
 
-
+void bldcSpeedCalc(){
+	if (bldcSpeed.rotatesCounter != 0){
+		bldcSpeed.currentRpm = bldcSpeed.timerCounter/bldcSpeed.rotatesCounter;
+		bldcSpeed.timerCounter = 0;
+	}
+}
 void bldcStartUp(void){
-	if (bldcDirection){
-		if (--bldcStep < 0) bldcStep = 5;
+	bldcSpeedCalc();
+	if (bldc.direction){
+		if (--bldc.step < 0) bldc.step = 5;
 	}
 	else{
-		if (++bldcStep >= 6) bldcStep = 0;
+		if (++bldc.step >= 6) bldc.step = 0;
 	}
 	
 	DIS_ALL;
@@ -361,15 +386,13 @@ void bldcStartUp(void){
 
 
 
-
 bool bldcRunning(void){
-	if (stepCounter != 0)
-		bldcSpeedRpm = speedTimerCounter/stepCounter;
-	if (zcCapturred){
-		bldcZcLag = 0;
-		zcCapturred = false;
+	bldcSpeedCalc();
+	if (bldc.zcCapturred){
+		bldc.zcLag = 0;
+		bldc.zcCapturred = false;
 	}
-	else if (++bldcZcLag > 200){
+	else if (++bldc.zcLag > 200){
 		return false;
 	}
 	return true;
@@ -380,8 +403,8 @@ bool bldcRunning(void){
 ISR (ANA_COMP_vect) {
 	// BEMF debounce
 	for(int i = 0; i < 10; i++) {
-if (bldcDirection){
-		if(bldcStep & 1){
+if (bldc.direction){
+		if(bldc.step & 1){
 			if((ACSR & (1 << ACO))) i -= 1;
 		}
 		else {
@@ -389,7 +412,7 @@ if (bldcDirection){
 		}
 }
 else{
-		if(bldcStep & 1){
+		if(bldc.step & 1){
 			if(!(ACSR & (1 << ACO))) i -= 1;
 		}
 		else {
@@ -397,18 +420,18 @@ else{
 		}
 }
 	}
-if (bldcDirection){
-	if (--bldcStep < 0) bldcStep = 5;
+if (bldc.direction){
+	if (--bldc.step < 0) bldc.step = 5;
 }
 else{
-	if (++bldcStep >= 6) bldcStep = 0;
+	if (++bldc.step >= 6) bldc.step = 0;
 }
 
 	DIS_ALL;
 	bldcNextStepZC();
-	zcCapturred = true;
+	bldc.zcCapturred = true;
 }
 
 ISR (TIMER1_OVF_vect) {
-	speedTimerCounter++;
+	bldcSpeed.timerCounter++;
 }
